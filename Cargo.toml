@@ -1,0 +1,13 @@
+[package]
+name = "wav-files-denoise-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.5.49", features = ["derive"] }
+ureq = { version = "3.1.2", features = ["json"] }
+walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.23.0"
