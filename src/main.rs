@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use serde::{Serialize, Deserialize};
 
 /// CLI arguments for wav-files-denoise.
 #[derive(Parser, Debug)]
@@ -21,13 +21,13 @@ struct Args {
 
 #[derive(Serialize)]
 struct DenoiseRequestBody {
-   filename: String,
-   filename_denoised: String,
+    filename: String,
+    filename_denoised: String,
 }
 
 #[derive(Deserialize)]
 struct DenoiseResponseBody {
-   filename_denoised: String,
+    filename_denoised: String,
 }
 
 /// Validates a WAV file matches the expected format: mono, 16-bit PCM, 16kHz sample rate.
@@ -52,10 +52,16 @@ fn main() -> Result<()> {
 
     // Ensure output directory exists
     std::fs::create_dir_all(&args.output_dir).with_context(|| {
-        format!("Failed to create output directory: {}", args.output_dir.display())
+        format!(
+            "Failed to create output directory: {}",
+            args.output_dir.display()
+        )
     })?;
     args.output_dir = args.output_dir.canonicalize().with_context(|| {
-        format!("Failed to find canonical path for output directory: {}", args.output_dir.display())
+        format!(
+            "Failed to find canonical path for output directory: {}",
+            args.output_dir.display()
+        )
     })?;
 
     let mut processed = 0;
@@ -104,10 +110,7 @@ fn main() -> Result<()> {
             .read_json::<DenoiseResponseBody>()?;
 
         if recv_body.filename_denoised.is_empty() {
-            eprintln!(
-                "Denoising failed for {}",
-                input_path.display(),
-            );
+            eprintln!("Denoising failed for {}", input_path.display(),);
             skipped += 1;
             continue;
         }
