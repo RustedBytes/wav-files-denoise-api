@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+use rayon::prelude::*;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use walkdir::WalkDir;
 
 /// CLI arguments for wav-files-denoise.
@@ -28,11 +31,6 @@ struct DenoiseRequestBody {
     filename: String,
     filename_denoised: String,
     model: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct DenoiseResponseBody {
-    filename_denoised: String,
 }
 
 /// Validates a WAV file matches the expected format: mono, 16-bit PCM, 16kHz sample rate.
@@ -69,72 +67,85 @@ fn main() -> Result<()> {
         )
     })?;
 
-    let mut processed = 0;
-    let mut skipped = 0;
+    let processed = AtomicUsize::new(0);
+    let skipped = AtomicUsize::new(0);
 
     if args.addr_api.is_empty() {
         anyhow::bail!("At least one API address must be provided via --addr-api");
     }
 
-    let mut api_endpoints = args.addr_api.iter().cycle();
+    let api_endpoints = Mutex::new(args.addr_api.iter().cycle());
 
-    for entry in WalkDir::new(&args.input_dir)
+    let wav_files: Vec<_> = WalkDir::new(&args.input_dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("wav"))
-    {
-        let input_path = entry.path().to_path_buf();
+        .collect();
 
-        // Validate WAV format
-        if !validate_wav(&input_path)? {
-            eprintln!("Skipping invalid WAV file: {}", input_path.display());
-            skipped += 1;
-            continue;
-        }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(args.addr_api.len())
+        .build()
+        .context("Failed to create thread pool")?;
 
-        // Compute relative path for output
-        let relative = input_path.strip_prefix(&args.input_dir)?;
+    pool.install(|| {
+        wav_files.par_iter().for_each(|entry| {
+            let input_path = entry.path();
 
-        let output_path = args.output_dir.join(relative);
+            // The closure for `for_each` doesn't return a Result, so we handle errors inside.
+            let process = || -> Result<()> {
+                if !validate_wav(input_path)? {
+                    eprintln!("Skipping invalid WAV file: {}", input_path.display());
+                    skipped.fetch_add(1, Ordering::SeqCst);
+                    return Ok(());
+                }
 
-        // Ensure output parent directory exists
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create output directory for: {}",
-                    output_path.display()
-                )
-            })?;
-        }
+                let relative = input_path.strip_prefix(&args.input_dir)?;
+                let output_path = args.output_dir.join(relative);
 
-        // Send a command to API to enhance this file
-        let body = DenoiseRequestBody {
-            filename: input_path.to_string_lossy().to_string(),
-            filename_denoised: output_path.to_string_lossy().to_string(),
-            model: args.model.clone(),
-        };
+                if let Some(parent) = output_path.parent() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "Failed to create output directory for: {}",
+                            output_path.display()
+                        )
+                    })?;
+                }
 
-        let api_addr = api_endpoints.next().unwrap(); // Will not panic as we check for empty list
+                let body = DenoiseRequestBody {
+                    filename: input_path.to_string_lossy().to_string(),
+                    filename_denoised: output_path.to_string_lossy().to_string(),
+                    model: args.model.clone(),
+                };
 
-        // Requires the `json` feature enabled.
-        let recv_body = ureq::post(api_addr)
-            .send_json(&body)?
-            .body_mut()
-            .read_json::<DenoiseResponseBody>()?;
+                let api_addr = api_endpoints.lock().unwrap().next().unwrap();
 
-        if recv_body.filename_denoised.is_empty() {
-            eprintln!("Denoising failed for {}", input_path.display(),);
-            skipped += 1;
-            continue;
-        }
+                let resp = ureq::post(api_addr).send_json(&body)?;
 
-        processed += 1;
-    }
+                if resp.status() == 200 {
+                    processed.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    eprintln!(
+                        "Denoising failed for {}: API returned status {}",
+                        input_path.display(),
+                        resp.status()
+                    );
+                    skipped.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(())
+            };
+
+            if let Err(e) = process() {
+                eprintln!("Error processing {}: {:?}", input_path.display(), e);
+                skipped.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+    });
 
     println!(
         "Denoising complete: {} files processed, {} skipped.",
-        processed, skipped
+        processed.load(Ordering::SeqCst),
+        skipped.load(Ordering::SeqCst)
     );
     Ok(())
 }
