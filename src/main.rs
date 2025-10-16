@@ -14,9 +14,9 @@ struct Args {
     /// Output directory for denoised files
     output_dir: PathBuf,
 
-    /// Address of the API server
-    #[arg(long)]
-    addr_api: String,
+    /// Comma-separated list of API server addresses
+    #[arg(long, value_delimiter = ',')]
+    addr_api: Vec<String>,
 
     /// Model to use for denoising
     #[arg(long)]
@@ -72,6 +72,12 @@ fn main() -> Result<()> {
     let mut processed = 0;
     let mut skipped = 0;
 
+    if args.addr_api.is_empty() {
+        anyhow::bail!("At least one API address must be provided via --addr-api");
+    }
+
+    let mut api_endpoints = args.addr_api.iter().cycle();
+
     for entry in WalkDir::new(&args.input_dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -109,8 +115,10 @@ fn main() -> Result<()> {
             model: args.model.clone(),
         };
 
+        let api_addr = api_endpoints.next().unwrap(); // Will not panic as we check for empty list
+
         // Requires the `json` feature enabled.
-        let recv_body = ureq::post(&args.addr_api)
+        let recv_body = ureq::post(api_addr)
             .send_json(&body)?
             .body_mut()
             .read_json::<DenoiseResponseBody>()?;
