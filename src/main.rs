@@ -17,12 +17,17 @@ struct Args {
     /// Address of the API server
     #[arg(long)]
     addr_api: String,
+
+    /// Model to use for denoising
+    #[arg(long)]
+    model: Option<String>,
 }
 
 #[derive(Serialize)]
 struct DenoiseRequestBody {
     filename: String,
     filename_denoised: String,
+    model: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +106,7 @@ fn main() -> Result<()> {
         let body = DenoiseRequestBody {
             filename: input_path.to_string_lossy().to_string(),
             filename_denoised: output_path.to_string_lossy().to_string(),
+            model: args.model.clone(),
         };
 
         // Requires the `json` feature enabled.
