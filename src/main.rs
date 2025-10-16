@@ -40,14 +40,22 @@ fn validate_wav(path: &Path) -> Result<bool> {
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+
+    // Resolve to absolute paths to avoid ambiguity
+    args.input_dir = args.input_dir.canonicalize().with_context(|| {
+        format!(
+            "Failed to find canonical path for input directory: {}",
+            args.input_dir.display()
+        )
+    })?;
 
     // Ensure output directory exists
     std::fs::create_dir_all(&args.output_dir).with_context(|| {
-        format!(
-            "Failed to create output directory: {}",
-            args.output_dir.display()
-        )
+        format!("Failed to create output directory: {}", args.output_dir.display())
+    })?;
+    args.output_dir = args.output_dir.canonicalize().with_context(|| {
+        format!("Failed to find canonical path for output directory: {}", args.output_dir.display())
     })?;
 
     let mut processed = 0;
@@ -69,12 +77,7 @@ fn main() -> Result<()> {
         }
 
         // Compute relative path for output
-        let relative = input_path.strip_prefix(&args.input_dir).with_context(|| {
-            format!(
-                "Failed to compute relative path for: {}",
-                input_path.display()
-            )
-        })?;
+        let relative = input_path.strip_prefix(&args.input_dir)?;
 
         let output_path = args.output_dir.join(relative);
 
