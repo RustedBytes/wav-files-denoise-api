@@ -109,3 +109,17 @@ Please ensure code is formatted with `cargo fmt` and tests pass before submittin
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+
+## Cite
+
+```
+@software{Smoliakov_Wav_Files_Toolkit,
+  author = {Smoliakov, Yehor},
+  month = oct,
+  title = {{WAV Files Toolkit: A suite of command-line tools for common WAV audio processing tasks, including conversion from other formats, data augmentation, loudness normalization, spectrogram generation, and validation.}},
+  url = {https://github.com/RustedBytes/wav-files-toolkit},
+  version = {0.4.0},
+  year = {2025}
+}
+```
